@@ -1,14 +1,14 @@
 import { useEffect, useRef } from 'react'
 
 /**
- * JellyBlob — a glossy kawaii slime sticker with emotions + actions.
+ * JellyBlob — a glossy 3D kawaii slime sticker with emotions + actions.
  *
  *  mood:  neutral | happy | sad | angry | surprised | love | sleepy | shy
- *         drives the face (eyes / brows / mouth) and the colour (via a smooth
- *         CSS hue-rotate so angry goes red, happy green, love pink, …).
  *  cue:   { type: 'shake' | 'bounce', id } — bump `id` to replay an action.
  *
- * Body wobble, blink, gaze, squash-and-stretch are all hand-rolled on rAF.
+ * The whole face + shine live inside the body group and are clipped to the
+ * (wobbling) silhouette, so they read as one 3D form rather than a flat
+ * overlay. The mouth is driven every frame so it opens on emotions/actions.
  */
 
 const VB = 320
@@ -17,6 +17,7 @@ const CY = 170
 const WX = 104
 const HY = 112
 const N = 30
+const MY = 185 // mouth baseline
 
 const K = 0.08
 const DAMP = 0.84
@@ -29,14 +30,26 @@ const smooth = (t) => t * t * (3 - 2 * t)
 
 // mood -> colour shift + face config. hue=null keeps the base colour.
 const MOODS = {
-  neutral:   { hue: null, sat: 1,   eyes: 'normal', lid: 0,     brow: null,    mouth: 'cat' },
-  happy:     { hue: 138,  sat: 1,   eyes: 'happy',  lid: 0,     brow: null,    mouth: 'grin' },
-  sad:       { hue: 210,  sat: 0.9, eyes: 'normal', lid: 0.15,  brow: 'sad',   mouth: 'frown', tear: true },
-  angry:     { hue: 2,    sat: 1.2, eyes: 'normal', lid: 0.18,  brow: 'angry', mouth: 'frown' },
-  surprised: { hue: 45,   sat: 1,   eyes: 'wide',   lid: -0.05, brow: 'up',    mouth: 'o' },
-  love:      { hue: 335,  sat: 1,   eyes: 'love',   lid: 0,     brow: null,    mouth: 'grin' },
-  sleepy:    { hue: null, sat: 0.55,eyes: 'normal', lid: 0.5,   brow: null,    mouth: 'flat' },
-  shy:       { hue: 330,  sat: 1,   eyes: 'closed', lid: 0,     brow: null,    mouth: 'small', blushBig: true },
+  neutral:   { hue: null, sat: 1,    eyes: 'normal', lid: 0,     brow: null },
+  happy:     { hue: 138,  sat: 1,    eyes: 'happy',  lid: 0,     brow: null },
+  sad:       { hue: 210,  sat: 0.9,  eyes: 'normal', lid: 0.15,  brow: 'sad', tear: true },
+  angry:     { hue: 2,    sat: 1.2,  eyes: 'normal', lid: 0.18,  brow: 'angry' },
+  surprised: { hue: 45,   sat: 1,    eyes: 'wide',   lid: -0.05, brow: 'up' },
+  love:      { hue: 335,  sat: 1,    eyes: 'love',   lid: 0,     brow: null },
+  sleepy:    { hue: null, sat: 0.55, eyes: 'normal', lid: 0.5,   brow: null },
+  shy:       { hue: 330,  sat: 1,    eyes: 'closed', lid: 0,     brow: null, blushBig: true },
+}
+
+// mouth shape per mood: w=half-width, s=smile(+)/frown(-), o=resting openness
+const MOUTHP = {
+  neutral:   { w: 11, s: 0.4, o: 5 },
+  happy:     { w: 17, s: 1.0, o: 13 },
+  sad:       { w: 13, s: -0.7, o: 4 },
+  angry:     { w: 16, s: -0.4, o: 12 },
+  surprised: { w: 12, s: 0.0, o: 17 },
+  love:      { w: 16, s: 1.0, o: 12 },
+  sleepy:    { w: 9, s: 0.0, o: 3 },
+  shy:       { w: 9, s: 0.5, o: 4 },
 }
 
 function buildShape() {
@@ -77,7 +90,6 @@ function lidPath(ex, ey, rx, ry, b) {
   return `M${ex - w},${top} H${ex + w} V${bottom} Q${ex},${bottom + 6} ${ex - w},${bottom} Z`
 }
 
-// a soft 4-point sparkle/star
 const sparkle = (x, y, s) =>
   `M${x},${y - s} Q${x},${y} ${x + s},${y} Q${x},${y} ${x},${y + s} Q${x},${y} ${x - s},${y} Q${x},${y} ${x},${y - s} Z`
 
@@ -92,12 +104,15 @@ export default function JellyBlob({ size = 300, hue = 265, mood = 'neutral', cue
   const shadeEl = useRef(null)
   const rimEl = useRef(null)
   const glowEl = useRef(null)
+  const bodyClip = useRef(null)
   const lEye = useRef(null)
   const rEye = useRef(null)
   const lLid = useRef(null)
   const rLid = useRef(null)
   const tearRef = useRef(null)
-  const mouthG = useRef(null)
+  const mouthRef = useRef(null)
+  const mouthClip = useRef(null)
+  const tongueRef = useRef(null)
 
   const ref = useRef(null)
   if (!ref.current) {
@@ -106,7 +121,7 @@ export default function JellyBlob({ size = 300, hue = 265, mood = 'neutral', cue
       px: 0, py: 0, vx: 0, vy: 0, tx: 0, ty: 0,
       dragging: false, grabDX: 0, grabDY: 0,
       pointer: { x: CX, y: EYE.cy, inside: false },
-      t: 0, pop: 0,
+      t: 0, pop: 0, mood,
       blinkWait: 900 + Math.random() * 2000, blinking: false, blinkClock: 0, queueDouble: false,
       action: null, actionClock: 0,
       tear: 0, mouthOpen: 0,
@@ -115,9 +130,7 @@ export default function JellyBlob({ size = 300, hue = 265, mood = 'neutral', cue
   const state = ref.current
   const face = MOODS[mood] || MOODS.neutral
 
-  // pop + open the mouth on every mood change
-  useEffect(() => { state.pop = 1; state.mouthOpen = 1 }, [mood])
-  // play an action cue (and open the mouth)
+  useEffect(() => { state.mood = mood; state.pop = 1; state.mouthOpen = 1 }, [mood])
   useEffect(() => {
     if (cue && cue.type) { state.action = cue.type; state.actionClock = 0; state.mouthOpen = 1 }
   }, [cue && cue.id])
@@ -164,11 +177,11 @@ export default function JellyBlob({ size = 300, hue = 265, mood = 'neutral', cue
       last = now
       state.t += dt
 
-      // silhouette springs
+      // silhouette springs (gentle idle ripple — kept small so the face tracks it)
       const pts = state.pts
       for (let i = 0; i < N; i++) {
         const p = pts[i]
-        const idle = Math.sin(state.t * 0.05 + p.ang * 3) * 3
+        const idle = Math.sin(state.t * 0.05 + p.ang * 3) * 1.4
         const a = pts[(i - 1 + N) % N].off, b = pts[(i + 1) % N].off
         p.v += (idle - p.off) * K + ((a + b) / 2 - p.off) * TENSION
         p.v *= DAMP
@@ -181,7 +194,7 @@ export default function JellyBlob({ size = 300, hue = 265, mood = 'neutral', cue
       state.vx *= 0.78; state.vy *= 0.78
       state.px += state.vx * dt; state.py += state.vy * dt
 
-      // action cues (shake / bounce)
+      // action cues
       let ax = 0, ay = 0
       if (state.action) {
         state.actionClock += dtMs
@@ -197,14 +210,15 @@ export default function JellyBlob({ size = 300, hue = 265, mood = 'neutral', cue
         }
       }
 
-      // squash + pop
+      // squash + breathe + pop (applied to the whole body+face together)
       const speed = Math.hypot(state.vx, state.vy)
       const dir = Math.atan2(state.vy, state.vx)
       const stretch = Math.min(0.20, speed * 0.012)
       state.pop *= 0.86
       const pop = 1 + state.pop * 0.12
-      const sx = (1 + stretch) * pop
-      const sy = (1 - stretch * 0.7) * pop
+      const breathe = 1 + Math.sin(state.t * 0.04) * 0.02
+      const sx = (1 + stretch) * pop * breathe
+      const sy = (1 - stretch * 0.7) * pop * (2 - breathe)
 
       const ring = pts.map((p) => ({ x: p.bx + p.nx * p.off, y: p.by + p.ny * p.off }))
       const d = smoothClosed(ring)
@@ -212,13 +226,14 @@ export default function JellyBlob({ size = 300, hue = 265, mood = 'neutral', cue
       shadeEl.current.setAttribute('d', d)
       rimEl.current.setAttribute('d', d)
       glowEl.current.setAttribute('d', d)
+      bodyClip.current.setAttribute('d', d)
       bodyG.current.setAttribute(
         'transform',
         `translate(${(state.px + ax).toFixed(2)} ${(state.py + ay).toFixed(2)}) ` +
           `rotate(${(dir * 180) / Math.PI} ${CX} ${CY}) scale(${sx.toFixed(3)} ${sy.toFixed(3)}) rotate(${(-dir * 180) / Math.PI} ${CX} ${CY})`
       )
 
-      // blink (only meaningful for open eyes)
+      // blink
       let bl = 0
       if (!state.blinking) {
         state.blinkWait -= dtMs
@@ -252,13 +267,21 @@ export default function JellyBlob({ size = 300, hue = 265, mood = 'neutral', cue
       lEye.current?.setAttribute('transform', `translate(${gx.toFixed(2)} ${gy.toFixed(2)})`)
       rEye.current?.setAttribute('transform', `translate(${gx.toFixed(2)} ${gy.toFixed(2)})`)
 
-      // mouth opens on emotions / actions, then settles
+      // --- mouth (driven every frame, opens on emotions/actions)
       state.mouthOpen *= 0.93
-      const mo = state.mouthOpen
-      mouthG.current?.setAttribute(
-        'transform',
-        `translate(${CX} 190) scale(${(1 + mo * 0.35).toFixed(3)} ${(1 + mo * 1.6).toFixed(3)}) translate(${-CX} -190)`
-      )
+      const mp = MOUTHP[state.mood] || MOUTHP.neutral
+      const open = Math.max(2, mp.o + state.mouthOpen * 12 + Math.sin(state.t * 0.05) * 0.5)
+      const w = mp.w
+      const cornerY = MY - mp.s * 4
+      const md = `M${CX - w},${cornerY.toFixed(1)} Q${CX},${(MY - open * 0.18).toFixed(1)} ${CX + w},${cornerY.toFixed(1)} Q${CX},${(MY + open * 0.9).toFixed(1)} ${CX - w},${cornerY.toFixed(1)} Z`
+      mouthRef.current.setAttribute('d', md)
+      mouthClip.current.setAttribute('d', md)
+      const tcy = MY + open * 0.5
+      tongueRef.current.setAttribute('cx', CX)
+      tongueRef.current.setAttribute('cy', tcy.toFixed(1))
+      tongueRef.current.setAttribute('rx', (w * 0.62).toFixed(1))
+      tongueRef.current.setAttribute('ry', Math.max(1, open * 0.34).toFixed(1))
+      tongueRef.current.setAttribute('opacity', Math.max(0, Math.min(1, open / 7 - 0.4)).toFixed(2))
 
       // tear (sad)
       if (tearRef.current) {
@@ -283,7 +306,8 @@ export default function JellyBlob({ size = 300, hue = 265, mood = 'neutral', cue
   }, [])
 
   const gid = `body-${hue}`, eid = `eye-${hue}`, fid = `glow-${hue}`
-  const sid = `shade-${hue}`, rgid = `rim-${hue}`
+  const sid = `shade-${hue}`, rgid = `rim-${hue}`, hid = `soft-${hue}`
+  const bclip = `bclip-${hue}`, mclip = `mclip-${hue}`, mgrad = `mouth-${hue}`
   const lidCol = `hsl(${hue}, 88%, 72%)`
   const cheek = `hsla(${(hue + 70) % 360}, 100%, 75%, ${face.blushBig ? 0.75 : 0.55})`
   const dark = `hsla(${hue}, 45%, 32%, 0.9)`
@@ -291,7 +315,6 @@ export default function JellyBlob({ size = 300, hue = 265, mood = 'neutral', cue
   const lex = CX - EYE.dx, rex = CX + EYE.dx
   const escale = face.eyes === 'wide' ? 1.15 : 1
 
-  // colour shift for the mood
   const deg = face.hue == null ? 0 : face.hue - hue
   const filter = `hue-rotate(${deg}deg) saturate(${face.sat})`
 
@@ -311,21 +334,12 @@ export default function JellyBlob({ size = 300, hue = 265, mood = 'neutral', cue
       </g>
     </g>
   )
-
-  const HappyEye = ({ ex }) => (
-    <path d={`M${ex - 16},${EYE.cy + 3} Q${ex},${EYE.cy - 15} ${ex + 16},${EYE.cy + 3}`}
-      fill="none" stroke="#23142e" strokeWidth="5" strokeLinecap="round" />
-  )
-  const ClosedEye = ({ ex }) => (
-    <path d={`M${ex - 15},${EYE.cy - 1} Q${ex},${EYE.cy + 9} ${ex + 15},${EYE.cy - 1}`}
-      fill="none" stroke="#23142e" strokeWidth="4.5" strokeLinecap="round" />
-  )
-  const LoveEye = ({ ex }) => <path d={heart(ex, EYE.cy, 30)} fill="#ff3d77" />
-
   const renderEye = (ex, eyeRef, lidRef, clipId) => {
-    if (face.eyes === 'happy') return <HappyEye ex={ex} />
-    if (face.eyes === 'closed') return <ClosedEye ex={ex} />
-    if (face.eyes === 'love') return <LoveEye ex={ex} />
+    if (face.eyes === 'happy')
+      return <path d={`M${ex - 16},${EYE.cy + 3} Q${ex},${EYE.cy - 15} ${ex + 16},${EYE.cy + 3}`} fill="none" stroke="#23142e" strokeWidth="5" strokeLinecap="round" />
+    if (face.eyes === 'closed')
+      return <path d={`M${ex - 15},${EYE.cy - 1} Q${ex},${EYE.cy + 9} ${ex + 15},${EYE.cy - 1}`} fill="none" stroke="#23142e" strokeWidth="4.5" strokeLinecap="round" />
+    if (face.eyes === 'love') return <path d={heart(ex, EYE.cy, 30)} fill="#ff3d77" />
     return <OpenEye ex={ex} eyeRef={eyeRef} lidRef={lidRef} clipId={clipId} />
   }
 
@@ -333,41 +347,13 @@ export default function JellyBlob({ size = 300, hue = 265, mood = 'neutral', cue
     if (!face.brow) return null
     let l, r
     if (face.brow === 'angry') {
-      l = `M${lex - 15},${BROWY - 3} L${lex + 13},${BROWY + 9}`
-      r = `M${rex + 15},${BROWY - 3} L${rex - 13},${BROWY + 9}`
+      l = `M${lex - 15},${BROWY - 3} L${lex + 13},${BROWY + 9}`; r = `M${rex + 15},${BROWY - 3} L${rex - 13},${BROWY + 9}`
     } else if (face.brow === 'sad') {
-      l = `M${lex - 15},${BROWY + 9} L${lex + 13},${BROWY - 2}`
-      r = `M${rex + 15},${BROWY + 9} L${rex - 13},${BROWY - 2}`
-    } else { // up / surprised
-      l = `M${lex - 14},${BROWY - 4} Q${lex},${BROWY - 12} ${lex + 14},${BROWY - 4}`
-      r = `M${rex - 14},${BROWY - 4} Q${rex},${BROWY - 12} ${rex + 14},${BROWY - 4}`
+      l = `M${lex - 15},${BROWY + 9} L${lex + 13},${BROWY - 2}`; r = `M${rex + 15},${BROWY + 9} L${rex - 13},${BROWY - 2}`
+    } else {
+      l = `M${lex - 14},${BROWY - 4} Q${lex},${BROWY - 12} ${lex + 14},${BROWY - 4}`; r = `M${rex - 14},${BROWY - 4} Q${rex},${BROWY - 12} ${rex + 14},${BROWY - 4}`
     }
-    return (
-      <g stroke={dark} strokeWidth="5" strokeLinecap="round" fill="none">
-        <path d={l} /><path d={r} />
-      </g>
-    )
-  }
-
-  const Mouth = () => {
-    const y = 184
-    if (face.mouth === 'grin')
-      return <path d={`M${CX - 22},${y - 1} Q${CX},${y + 24} ${CX + 22},${y - 1} Q${CX},${y + 8} ${CX - 22},${y - 1} Z`} fill="#7a1f3a" />
-    if (face.mouth === 'frown')
-      return <path d={`M${CX - 15},${y + 9} Q${CX},${y - 4} ${CX + 15},${y + 9}`} fill="none" stroke={dark} strokeWidth="3.5" strokeLinecap="round" />
-    if (face.mouth === 'o')
-      return <ellipse cx={CX} cy={y + 4} rx="8" ry="10" fill="#7a1f3a" />
-    if (face.mouth === 'flat')
-      return <path d={`M${CX - 11},${y + 4} L${CX + 11},${y + 4}`} fill="none" stroke={dark} strokeWidth="3.5" strokeLinecap="round" />
-    if (face.mouth === 'small')
-      return <path d={`M${CX - 8},${y + 1} Q${CX},${y + 7} ${CX + 8},${y + 1}`} fill="none" stroke={dark} strokeWidth="3" strokeLinecap="round" />
-    // open — small rounded open smile (default)
-    return (
-      <g>
-        <path d={`M${CX - 11},${y - 1} Q${CX},${y + 4} ${CX + 11},${y - 1} Q${CX + 4},${y + 14} ${CX},${y + 14} Q${CX - 4},${y + 14} ${CX - 11},${y - 1} Z`} fill="#7a1f3a" />
-        <ellipse cx={CX} cy={y + 10} rx="5" ry="3.2" fill="#e0607c" opacity="0.85" />
-      </g>
-    )
+    return <g stroke={dark} strokeWidth="5" strokeLinecap="round" fill="none"><path d={l} /><path d={r} /></g>
   }
 
   return (
@@ -380,64 +366,84 @@ export default function JellyBlob({ size = 300, hue = 265, mood = 'neutral', cue
       style={{ touchAction: 'none', cursor: 'grab', overflow: 'visible', userSelect: 'none', filter, transition: 'filter 0.45s ease' }}
     >
       <defs>
-        <radialGradient id={gid} cx="50%" cy="62%" r="72%">
-          <stop offset="0%" stopColor={`hsl(${hue}, 100%, 84%)`} />
-          <stop offset="55%" stopColor={`hsl(${hue}, 90%, 72%)`} />
-          <stop offset="100%" stopColor={`hsl(${hue}, 78%, 56%)`} />
+        <radialGradient id={gid} cx="48%" cy="36%" r="74%">
+          <stop offset="0%" stopColor={`hsl(${hue}, 100%, 88%)`} />
+          <stop offset="46%" stopColor={`hsl(${hue}, 92%, 70%)`} />
+          <stop offset="100%" stopColor={`hsl(${hue}, 82%, 46%)`} />
         </radialGradient>
         <radialGradient id={eid} cx="50%" cy="42%" r="62%">
           <stop offset="0%" stopColor={`hsl(${hue}, 45%, 26%)`} />
           <stop offset="100%" stopColor={`hsl(${hue}, 60%, 11%)`} />
         </radialGradient>
-        {/* ambient-occlusion: dark, bottom-weighted edges for a round 3D look */}
-        <radialGradient id={sid} cx="50%" cy="38%" r="68%">
-          <stop offset="0%" stopColor={`hsla(${hue}, 80%, 30%, 0)`} />
-          <stop offset="62%" stopColor={`hsla(${hue}, 80%, 28%, 0)`} />
-          <stop offset="88%" stopColor={`hsla(${hue}, 78%, 24%, 0.28)`} />
-          <stop offset="100%" stopColor={`hsla(${hue}, 80%, 16%, 0.55)`} />
+        {/* ambient occlusion — dark, bottom-weighted edges = round 3D volume */}
+        <radialGradient id={sid} cx="50%" cy="34%" r="70%">
+          <stop offset="0%" stopColor={`hsla(${hue}, 80%, 28%, 0)`} />
+          <stop offset="58%" stopColor={`hsla(${hue}, 80%, 26%, 0)`} />
+          <stop offset="84%" stopColor={`hsla(${hue}, 80%, 22%, 0.32)`} />
+          <stop offset="100%" stopColor={`hsl(${hue}, 82%, 14%)`} />
         </radialGradient>
         {/* bright top rim light */}
         <linearGradient id={rgid} x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor={`hsla(${hue}, 100%, 92%, 0.55)`} />
-          <stop offset="26%" stopColor={`hsla(${hue}, 100%, 90%, 0)`} />
-          <stop offset="100%" stopColor={`hsla(${hue}, 100%, 90%, 0)`} />
+          <stop offset="0%" stopColor={`hsla(${hue}, 100%, 95%, 0.7)`} />
+          <stop offset="22%" stopColor={`hsla(${hue}, 100%, 92%, 0)`} />
+          <stop offset="100%" stopColor={`hsla(${hue}, 100%, 92%, 0)`} />
         </linearGradient>
-        <filter id={fid} x="-50%" y="-50%" width="200%" height="200%">
-          <feGaussianBlur stdDeviation="11" />
-        </filter>
+        {/* 3D mouth cavity */}
+        <linearGradient id={mgrad} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor="#3d0b18" />
+          <stop offset="45%" stopColor="#7a1f38" />
+          <stop offset="100%" stopColor="#b83353" />
+        </linearGradient>
+        <filter id={fid} x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="11" /></filter>
+        <filter id={hid} x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="4.5" /></filter>
+        <clipPath id={bclip}><path ref={bodyClip} d="" /></clipPath>
+        <clipPath id={mclip}><path ref={mouthClip} d="" /></clipPath>
       </defs>
 
+      {/* ground shadow (stays put) */}
       <ellipse cx={CX} cy={CY + HY + 6} rx="84" ry="15" fill="rgba(0,0,0,0.22)" />
-      <path ref={glowEl} d="" fill={`hsla(${hue}, 100%, 70%, 0.35)`} filter={`url(#${fid})`} />
 
       <g ref={bodyG}>
+        {/* outer glow (moves with body) */}
+        <path ref={glowEl} d="" fill={`hsla(${hue}, 100%, 70%, 0.35)`} filter={`url(#${fid})`} />
+
+        {/* body fill */}
         <path ref={pathRef} d="" fill={`url(#${gid})`} />
-        <ellipse cx={CX} cy={CY + 44} rx="74" ry="52" fill={`hsl(${hue}, 100%, 86%)`} opacity="0.4" />
-        {/* 3D depth: occlusion edges + top rim light */}
-        <path ref={shadeEl} d="" fill={`url(#${sid})`} />
-        <path ref={rimEl} d="" fill={`url(#${rgid})`} />
 
-        {/* glossy shine */}
-        <ellipse cx={CX - 20} cy={CY - 76} rx="54" ry="31" fill="#fff" opacity="0.34" transform="rotate(-18 140 94)" />
-        <ellipse cx={CX - 33} cy={CY - 82} rx="18" ry="10" fill="#fff" opacity="0.72" transform="rotate(-18 127 88)" />
-        <ellipse cx={CX + 46} cy={CY - 30} rx="9" ry="20" fill="#fff" opacity="0.28" transform="rotate(24 206 140)" />
-
-        {/* sparkles */}
-        <g fill="#fff">
-          <path d={sparkle(CX - 56, CY - 4, 7)} opacity="0.9" />
-          <path d={sparkle(CX + 52, CY + 10, 5)} opacity="0.85" />
-          <circle cx={CX + 30} cy={CY - 64} r="2.4" opacity="0.85" />
-          <circle cx={CX - 30} cy={CY + 40} r="2" opacity="0.7" />
+        {/* shine + shading, clipped to the body so it's part of the 3D form */}
+        <g clipPath={`url(#${bclip})`}>
+          <ellipse cx={CX} cy={CY + 46} rx="76" ry="54" fill={`hsl(${hue}, 100%, 86%)`} opacity="0.45" />
+          <path ref={shadeEl} d="" fill={`url(#${sid})`} />
+          <path ref={rimEl} d="" fill={`url(#${rgid})`} />
+          {/* soft wet specular */}
+          <ellipse cx={CX - 22} cy={CY - 70} rx="46" ry="26" fill="#fff" opacity="0.4" filter={`url(#${hid})`} transform="rotate(-18 138 100)" />
+          <ellipse cx={CX - 34} cy={CY - 80} rx="13" ry="7" fill="#fff" opacity="0.85" transform="rotate(-18 126 90)" />
+          <ellipse cx={CX + 48} cy={CY - 24} rx="8" ry="20" fill="#fff" opacity="0.22" filter={`url(#${hid})`} transform="rotate(24 208 146)" />
+          {/* sparkles */}
+          <g fill="#fff">
+            <path d={sparkle(CX - 54, CY - 2, 6)} opacity="0.9" />
+            <path d={sparkle(CX + 50, CY + 14, 4.5)} opacity="0.85" />
+            <circle cx={CX + 28} cy={CY - 58} r="2.2" opacity="0.8" />
+          </g>
         </g>
 
+        {/* cheeks */}
         <ellipse cx={CX - 60} cy={EYE.cy + 30} rx={face.blushBig ? 20 : 17} ry={face.blushBig ? 13 : 11} fill={cheek} />
         <ellipse cx={CX + 60} cy={EYE.cy + 30} rx={face.blushBig ? 20 : 17} ry={face.blushBig ? 13 : 11} fill={cheek} />
 
+        {/* eyes */}
         {renderEye(lex, lEye, lLid, `lc-${hue}`)}
         {renderEye(rex, rEye, rLid, `rc-${hue}`)}
         <Brows />
         {face.tear && <ellipse ref={tearRef} cx={lex + 4} cy={EYE.cy + EYE.ry} rx="5" ry="7" fill="#7ec8ff" />}
-        <g ref={mouthG}><Mouth /></g>
+
+        {/* mouth — counter-rotate so it stays maroon regardless of mood hue-shift */}
+        <g style={{ filter: `hue-rotate(${-deg}deg)` }}>
+          <path ref={mouthRef} d="" fill={`url(#${mgrad})`} />
+          <g clipPath={`url(#${mclip})`}>
+            <ellipse ref={tongueRef} cx={CX} cy={MY + 6} rx="7" ry="3" fill="#ef7a93" />
+          </g>
+        </g>
       </g>
     </svg>
   )
