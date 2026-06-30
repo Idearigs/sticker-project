@@ -27,16 +27,17 @@ const EYE = { rx: 22, ry: 26, dx: 35, cy: 150 }
 const BROWY = EYE.cy - EYE.ry - 4
 
 const smooth = (t) => t * t * (3 - 2 * t)
+const lerp = (a, b, t) => a + (b - a) * t
 
 // mood -> colour shift + face config. hue=null keeps the base colour.
 const MOODS = {
   neutral:   { hue: null, sat: 1,    eyes: 'normal', lid: 0,     brow: null },
   happy:     { hue: 138,  sat: 1,    eyes: 'happy',  lid: 0,     brow: null },
-  sad:       { hue: 210,  sat: 0.9,  eyes: 'normal', lid: 0.15,  brow: 'sad', tear: true },
-  angry:     { hue: 2,    sat: 1.2,  eyes: 'normal', lid: 0.18,  brow: 'angry' },
-  surprised: { hue: 45,   sat: 1,    eyes: 'wide',   lid: -0.05, brow: 'up' },
+  sad:       { hue: 210,  sat: 0.9,  eyes: 'normal', lid: 0.26,  brow: 'sad', tear: true },
+  angry:     { hue: 2,    sat: 1.2,  eyes: 'normal', lid: 0.2,   brow: 'angry' },
+  surprised: { hue: 45,   sat: 1,    eyes: 'wide',   lid: -0.08, brow: 'up' },
   love:      { hue: 335,  sat: 1,    eyes: 'love',   lid: 0,     brow: null },
-  sleepy:    { hue: null, sat: 0.55, eyes: 'normal', lid: 0.5,   brow: null },
+  sleepy:    { hue: null, sat: 0.55, eyes: 'normal', lid: 0.6,   brow: null },
   shy:       { hue: 330,  sat: 1,    eyes: 'closed', lid: 0,     brow: null, blushBig: true },
   // squeezed-shut eyes for "not peeking at your password" — keeps base colour
   password:  { hue: null, sat: 1,    eyes: 'happy',  lid: 0,     brow: null, blushBig: true },
@@ -49,7 +50,7 @@ const MOUTHP = {
   happy:     { w: 15, s: 1.2, o: 3 },
   sad:       { w: 12, s: -0.8, o: 0 },
   angry:     { w: 14, s: -0.5, o: 2 },
-  surprised: { w: 11, s: 0.0, o: 5 },
+  surprised: { w: 14, s: 0.0, o: 26 },
   love:      { w: 15, s: 1.2, o: 2 },
   sleepy:    { w: 9, s: 0.1, o: 0 },
   shy:       { w: 9, s: 0.6, o: 0 },
@@ -118,6 +119,12 @@ export default function JellyBlob({ size = 300, hue = 265, mood = 'neutral', cue
   const mouthRef = useRef(null)
   const mouthClip = useRef(null)
   const tongueRef = useRef(null)
+  const lPaw = useRef(null)
+  const rPaw = useRef(null)
+  const heartFx = useRef([])
+  const zzzFx = useRef([])
+  const steamFx = useRef([])
+  const sweatFx = useRef(null)
 
   const ref = useRef(null)
   if (!ref.current) {
@@ -130,7 +137,7 @@ export default function JellyBlob({ size = 300, hue = 265, mood = 'neutral', cue
       blinkWait: 900 + Math.random() * 2000, blinking: false, blinkClock: 0, queueDouble: false,
       action: null, actionClock: 0,
       tear: 0, mouthOpen: 0,
-      gaze: null, leanX: 0, leanY: 0,
+      gaze: null, leanX: 0, leanY: 0, cover: 0,
     }
   }
   const state = ref.current
@@ -224,16 +231,70 @@ export default function JellyBlob({ size = 300, hue = 265, mood = 'neutral', cue
       state.pop *= 0.86
       const pop = 1 + state.pop * 0.12
       const breathe = 1 + Math.sin(state.t * 0.04) * 0.02
-      const sx = (1 + stretch) * pop * breathe
-      const sy = (1 - stretch * 0.7) * pop * (2 - breathe)
+
+      // per-mood body language — each emotion moves differently
+      const T = state.t
+      let mbx = 0, mby = 0, msx = 1, msy = 1
+      switch (state.mood) {
+        case 'happy': {            // bouncy hops with squash-and-stretch
+          const h = Math.abs(Math.sin(T * 0.11))
+          mby = -h * 13; msx = 1 + (1 - h) * 0.06 - h * 0.05; msy = 1 - (1 - h) * 0.06 + h * 0.05
+          break
+        }
+        case 'angry': {            // trembling with rage
+          mbx = (Math.random() - 0.5) * 3.4; mby = (Math.random() - 0.5) * 2.4
+          msx = 1 + Math.sin(T * 0.22) * 0.02; msy = 1 - Math.sin(T * 0.22) * 0.02
+          break
+        }
+        case 'sad': {              // slumps down, sinks and deflates
+          mby = 8 + Math.sin(T * 0.03) * 1.5; msx = 1.03; msy = 0.94
+          break
+        }
+        case 'surprised': {        // startled jitter
+          mbx = Math.sin(T * 0.6) * 1.4; mby = Math.sin(T * 0.52) * 1.1
+          break
+        }
+        case 'love': {             // heartbeat throb
+          const b = Math.pow(Math.abs(Math.sin(T * 0.06)), 0.4)
+          msx = 1 + b * 0.05; msy = 1 + b * 0.05; mby = -b * 2
+          break
+        }
+        case 'sleepy': {           // slow heavy breathing + gentle nod
+          const br = Math.sin(T * 0.02)
+          msx = 1 + br * 0.035; msy = 1 - br * 0.03; mby = Math.abs(br) * 3
+          break
+        }
+        case 'shy': {              // bashful side-to-side fidget
+          mbx = Math.sin(T * 0.05) * 5
+          break
+        }
+      }
+      const sx = (1 + stretch) * pop * breathe * msx
+      const sy = (1 - stretch * 0.7) * pop * (2 - breathe) * msy
 
       // lean toward the gaze target (form companion "lean-in")
       const gz = state.gaze
-      const ltx = gz ? Math.max(-16, Math.min(16, gz.x * 0.24)) : 0
+      const ltx = gz ? Math.max(-22, Math.min(22, gz.x * 0.32)) : 0
       const lty = gz ? Math.max(-12, Math.min(12, gz.y * 0.2)) : 0
       state.leanX += (ltx - state.leanX) * 0.12
       state.leanY += (lty - state.leanY) * 0.12
-      const lean = state.leanX * 0.36 // degrees of body tilt
+      const lean = state.leanX * 0.5 // degrees of body tilt
+
+      // paws cover the eyes while typing a password
+      const coverTarget = state.mood === 'password' ? 1 : 0
+      state.cover += (coverTarget - state.cover) * 0.14
+      const cv = state.cover
+      const lift = Math.sin(Math.min(1, cv) * Math.PI) * 16
+      if (lPaw.current) {
+        const dx = lerp(0, (CX - EYE.dx) - (CX - 114), cv)
+        const dy = lerp(0, (EYE.cy + 2) - (CY + 18), cv) - lift
+        lPaw.current.setAttribute('transform', `translate(${dx.toFixed(1)} ${dy.toFixed(1)}) rotate(${(-cv * 18).toFixed(1)} ${CX - 114} ${CY + 18})`)
+      }
+      if (rPaw.current) {
+        const dx = lerp(0, (CX + EYE.dx) - (CX + 114), cv)
+        const dy = lerp(0, (EYE.cy + 2) - (CY + 18), cv) - lift
+        rPaw.current.setAttribute('transform', `translate(${dx.toFixed(1)} ${dy.toFixed(1)}) rotate(${(cv * 18).toFixed(1)} ${CX + 114} ${CY + 18})`)
+      }
 
       const ring = pts.map((p) => ({ x: p.bx + p.nx * p.off, y: p.by + p.ny * p.off }))
       const d = smoothClosed(ring)
@@ -244,7 +305,7 @@ export default function JellyBlob({ size = 300, hue = 265, mood = 'neutral', cue
       bodyClip.current.setAttribute('d', d)
       bodyG.current.setAttribute(
         'transform',
-        `translate(${(state.px + ax + state.leanX).toFixed(2)} ${(state.py + ay + state.leanY).toFixed(2)}) ` +
+        `translate(${(state.px + ax + state.leanX + mbx).toFixed(2)} ${(state.py + ay + state.leanY + mby).toFixed(2)}) ` +
           `rotate(${lean.toFixed(2)} ${CX} ${CY}) ` +
           `rotate(${(dir * 180) / Math.PI} ${CX} ${CY}) scale(${sx.toFixed(3)} ${sy.toFixed(3)}) rotate(${(-dir * 180) / Math.PI} ${CX} ${CY})`
       )
@@ -271,9 +332,12 @@ export default function JellyBlob({ size = 300, hue = 265, mood = 'neutral', cue
       lLid.current?.setAttribute('d', lidPath(CX - EYE.dx, EYE.cy, EYE.rx, EYE.ry, effLid))
       rLid.current?.setAttribute('d', lidPath(CX + EYE.dx, EYE.cy, EYE.rx, EYE.ry, effLid))
 
-      // gaze — explicit gaze prop wins, else track the pointer
+      // gaze — surprised darts side to side; else explicit gaze, else the pointer
       let gx = 0, gy = 0
-      if (gz) {
+      if (state.mood === 'surprised') {
+        gx = Math.sin(state.t * 0.05) * 6.5
+        gy = -1.5
+      } else if (gz) {
         gx = Math.max(-6, Math.min(6, gz.x * 0.1))
         gy = Math.max(-6, Math.min(6, gz.y * 0.1))
       } else if (state.pointer.inside) {
@@ -289,22 +353,36 @@ export default function JellyBlob({ size = 300, hue = 265, mood = 'neutral', cue
       // --- mouth: rests closed (a small lip line), opens on emotions/actions
       state.mouthOpen *= 0.92
       const mp = MOUTHP[state.mood] || MOUTHP.neutral
-      const openH = Math.max(0, mp.o + state.mouthOpen * 13)
-      const w = mp.w
-      const sd = mp.s * 5 // lip curve depth (smile = bulge down)
-      // closed lip line (always visible) — a soft smile/frown
-      lipRef.current.setAttribute('d', `M${CX - w},${MY} Q${CX},${(MY + sd).toFixed(1)} ${CX + w},${MY}`)
-      // open cavity (fades in as it opens)
-      const cw = w * 0.82
-      const cav = `M${CX - cw},${MY - 0.5} Q${CX},${(MY + mp.s * 3).toFixed(1)} ${CX + cw},${MY - 0.5} Q${CX},${(MY + openH).toFixed(1)} ${CX - cw},${MY - 0.5} Z`
+      const surprised = state.mood === 'surprised'
+      // surprised "wow" — sustained big round O that pulses like talking
+      const wow = surprised ? 6 + Math.sin(state.t * 0.16) * 6 : 0
+      const openH = Math.max(0, mp.o + wow + state.mouthOpen * 13)
+      const w = mp.w + wow * 0.3
+      const sd = mp.s * 5
       const cavOp = Math.max(0, Math.min(1, (openH - 2) / 5))
+
+      // lip line — the resting closed mouth; fades out as the mouth opens
+      lipRef.current.setAttribute('d', `M${CX - mp.w},${MY} Q${CX},${(MY + sd).toFixed(1)} ${CX + mp.w},${MY}`)
+      lipRef.current.setAttribute('opacity', (1 - cavOp).toFixed(2))
+
+      let cav, tcy, trx, tryy
+      if (surprised) {
+        // a full round O (ellipse)
+        const rx = w, ry = Math.max(4, openH * 0.5), cy = MY + 3
+        cav = `M${(CX - rx).toFixed(1)},${cy.toFixed(1)} a${rx.toFixed(1)},${ry.toFixed(1)} 0 1 0 ${(2 * rx).toFixed(1)},0 a${rx.toFixed(1)},${ry.toFixed(1)} 0 1 0 ${(-2 * rx).toFixed(1)},0 Z`
+        tcy = cy + ry * 0.42; trx = rx * 0.6; tryy = ry * 0.32
+      } else {
+        const cw = w * 0.82
+        cav = `M${(CX - cw).toFixed(1)},${(MY - 0.5).toFixed(1)} Q${CX},${(MY + mp.s * 3).toFixed(1)} ${(CX + cw).toFixed(1)},${(MY - 0.5).toFixed(1)} Q${CX},${(MY + openH).toFixed(1)} ${(CX - cw).toFixed(1)},${(MY - 0.5).toFixed(1)} Z`
+        tcy = MY + openH * 0.5; trx = cw * 0.7; tryy = Math.max(1, openH * 0.32)
+      }
       mouthRef.current.setAttribute('d', cav)
       mouthRef.current.setAttribute('opacity', cavOp.toFixed(2))
       mouthClip.current.setAttribute('d', cav)
       tongueRef.current.setAttribute('cx', CX)
-      tongueRef.current.setAttribute('cy', (MY + openH * 0.5).toFixed(1))
-      tongueRef.current.setAttribute('rx', (cw * 0.7).toFixed(1))
-      tongueRef.current.setAttribute('ry', Math.max(1, openH * 0.32).toFixed(1))
+      tongueRef.current.setAttribute('cy', tcy.toFixed(1))
+      tongueRef.current.setAttribute('rx', trx.toFixed(1))
+      tongueRef.current.setAttribute('ry', Math.max(1, tryy).toFixed(1))
       tongueRef.current.setAttribute('opacity', cavOp.toFixed(2))
 
       // tear (sad)
@@ -314,6 +392,47 @@ export default function JellyBlob({ size = 300, hue = 265, mood = 'neutral', cue
         const ty = (state.tear * 0.8) % range
         tearRef.current.setAttribute('cy', (EYE.cy + EYE.ry - 2 + ty).toFixed(2))
         tearRef.current.setAttribute('opacity', (1 - ty / range).toFixed(2))
+      }
+
+      // --- mood FX particles
+      const isLove = state.mood === 'love'
+      for (let i = 0; i < 3; i++) {
+        const el = heartFx.current[i]; if (!el) continue
+        if (isLove) {
+          const ph = ((T * 0.016) + i / 3) % 1
+          const x = CX + (i - 1) * 22 + Math.sin(ph * 6 + i) * 8
+          const y = 132 - ph * 92
+          el.setAttribute('transform', `translate(${x.toFixed(1)} ${y.toFixed(1)}) scale(${(0.5 + ph).toFixed(2)})`)
+          el.setAttribute('opacity', (Math.sin(ph * Math.PI) * 0.95).toFixed(2))
+        } else el.setAttribute('opacity', '0')
+      }
+      const isSleepy = state.mood === 'sleepy'
+      for (let i = 0; i < 3; i++) {
+        const el = zzzFx.current[i]; if (!el) continue
+        if (isSleepy) {
+          const ph = ((T * 0.01) + i / 3) % 1
+          el.setAttribute('transform', `translate(${(CX + 50 + ph * 22).toFixed(1)} ${(98 - ph * 54).toFixed(1)})`)
+          el.setAttribute('opacity', (Math.sin(ph * Math.PI) * 0.9).toFixed(2))
+        } else el.setAttribute('opacity', '0')
+      }
+      const isAngry = state.mood === 'angry'
+      for (let i = 0; i < 2; i++) {
+        const el = steamFx.current[i]; if (!el) continue
+        if (isAngry) {
+          const ph = ((T * 0.035) + i * 0.5) % 1
+          el.setAttribute('cx', CX + (i ? 66 : -66))
+          el.setAttribute('cy', (88 - ph * 44).toFixed(1))
+          el.setAttribute('ry', (6 + ph * 6).toFixed(1))
+          el.setAttribute('opacity', (Math.sin(ph * Math.PI) * 0.5).toFixed(2))
+        } else el.setAttribute('opacity', '0')
+      }
+      if (sweatFx.current) {
+        if (state.mood === 'shy') {
+          const ph = (T * 0.02) % 1
+          const x = CX + 60, y = 118 + ph * 34
+          sweatFx.current.setAttribute('d', `M${x},${y.toFixed(1)} q5,7 0,12 q-5,-5 0,-12 Z`)
+          sweatFx.current.setAttribute('opacity', (ph < 0.85 ? 0.8 : ((1 - ph) / 0.15) * 0.8).toFixed(2))
+        } else sweatFx.current.setAttribute('opacity', '0')
       }
 
       raf = requestAnimationFrame(tick)
@@ -482,6 +601,30 @@ export default function JellyBlob({ size = 300, hue = 265, mood = 'neutral', cue
           </g>
           {/* lip line — the resting closed mouth */}
           <path ref={lipRef} d="" fill="none" stroke="#9c2d4b" strokeWidth="3.4" strokeLinecap="round" />
+        </g>
+
+        {/* little arms — rest at the sides, rise to cover the eyes for 'password' */}
+        <g ref={lPaw}>
+          <ellipse cx={CX - 114} cy={CY + 18} rx="16" ry="18" fill={`url(#${gid})`} stroke={`hsla(${hue}, 70%, 40%, 0.5)`} strokeWidth="1" />
+          <ellipse cx={CX - 116} cy={CY + 12} rx="8" ry="6" fill="#fff" opacity="0.22" />
+        </g>
+        <g ref={rPaw}>
+          <ellipse cx={CX + 114} cy={CY + 18} rx="16" ry="18" fill={`url(#${gid})`} stroke={`hsla(${hue}, 70%, 40%, 0.5)`} strokeWidth="1" />
+          <ellipse cx={CX + 116} cy={CY + 12} rx="8" ry="6" fill="#fff" opacity="0.22" />
+        </g>
+
+        {/* mood FX — counter-rotated so authored colours survive the mood hue-shift */}
+        <g style={{ filter: `hue-rotate(${-deg}deg)` }}>
+          {[0, 1, 2].map((i) => (
+            <path key={`h${i}`} ref={(el) => (heartFx.current[i] = el)} d={heart(0, 0, 8)} fill="#ff4d7d" opacity="0" />
+          ))}
+          {[0, 1, 2].map((i) => (
+            <text key={`z${i}`} ref={(el) => (zzzFx.current[i] = el)} fontSize={12 + i * 5} fontWeight="800" fontFamily="system-ui, sans-serif" fill="#bcd2ff" opacity="0">Z</text>
+          ))}
+          {[0, 1].map((i) => (
+            <ellipse key={`s${i}`} ref={(el) => (steamFx.current[i] = el)} rx="6" ry="8" fill="#ff8a6b" opacity="0" />
+          ))}
+          <path ref={sweatFx} d="" fill="#9fd4ff" opacity="0" />
         </g>
       </g>
     </svg>
