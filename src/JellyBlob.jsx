@@ -38,6 +38,8 @@ const MOODS = {
   love:      { hue: 335,  sat: 1,    eyes: 'love',   lid: 0,     brow: null },
   sleepy:    { hue: null, sat: 0.55, eyes: 'normal', lid: 0.5,   brow: null },
   shy:       { hue: 330,  sat: 1,    eyes: 'closed', lid: 0,     brow: null, blushBig: true },
+  // squeezed-shut eyes for "not peeking at your password" — keeps base colour
+  password:  { hue: null, sat: 1,    eyes: 'happy',  lid: 0,     brow: null, blushBig: true },
 }
 
 // mouth shape per mood: w=half-width, s=smile(+)/frown(-), o=resting openness
@@ -51,6 +53,7 @@ const MOUTHP = {
   love:      { w: 15, s: 1.2, o: 2 },
   sleepy:    { w: 9, s: 0.1, o: 0 },
   shy:       { w: 9, s: 0.6, o: 0 },
+  password:  { w: 10, s: 0.7, o: 0 },
 }
 
 function buildShape() {
@@ -98,7 +101,7 @@ const heart = (cx, cy, s) =>
   `M${cx},${cy + 0.3 * s} C${cx - 0.62 * s},${cy - 0.2 * s} ${cx - 0.62 * s},${cy - 0.72 * s} ${cx},${cy - 0.34 * s} ` +
   `C${cx + 0.62 * s},${cy - 0.72 * s} ${cx + 0.62 * s},${cy - 0.2 * s} ${cx},${cy + 0.3 * s} Z`
 
-export default function JellyBlob({ size = 300, hue = 265, mood = 'neutral', cue = null, className = '' }) {
+export default function JellyBlob({ size = 300, hue = 265, mood = 'neutral', cue = null, gaze = null, className = '' }) {
   const svgRef = useRef(null)
   const bodyG = useRef(null)
   const pathRef = useRef(null)
@@ -127,10 +130,12 @@ export default function JellyBlob({ size = 300, hue = 265, mood = 'neutral', cue
       blinkWait: 900 + Math.random() * 2000, blinking: false, blinkClock: 0, queueDouble: false,
       action: null, actionClock: 0,
       tear: 0, mouthOpen: 0,
+      gaze: null, leanX: 0, leanY: 0,
     }
   }
   const state = ref.current
   const face = MOODS[mood] || MOODS.neutral
+  state.gaze = gaze // { x, y } target direction the blob looks/leans toward
 
   useEffect(() => { state.mood = mood; state.pop = 1; state.mouthOpen = 1 }, [mood])
   useEffect(() => {
@@ -222,6 +227,14 @@ export default function JellyBlob({ size = 300, hue = 265, mood = 'neutral', cue
       const sx = (1 + stretch) * pop * breathe
       const sy = (1 - stretch * 0.7) * pop * (2 - breathe)
 
+      // lean toward the gaze target (form companion "lean-in")
+      const gz = state.gaze
+      const ltx = gz ? Math.max(-16, Math.min(16, gz.x * 0.24)) : 0
+      const lty = gz ? Math.max(-12, Math.min(12, gz.y * 0.2)) : 0
+      state.leanX += (ltx - state.leanX) * 0.12
+      state.leanY += (lty - state.leanY) * 0.12
+      const lean = state.leanX * 0.36 // degrees of body tilt
+
       const ring = pts.map((p) => ({ x: p.bx + p.nx * p.off, y: p.by + p.ny * p.off }))
       const d = smoothClosed(ring)
       pathRef.current.setAttribute('d', d)
@@ -231,7 +244,8 @@ export default function JellyBlob({ size = 300, hue = 265, mood = 'neutral', cue
       bodyClip.current.setAttribute('d', d)
       bodyG.current.setAttribute(
         'transform',
-        `translate(${(state.px + ax).toFixed(2)} ${(state.py + ay).toFixed(2)}) ` +
+        `translate(${(state.px + ax + state.leanX).toFixed(2)} ${(state.py + ay + state.leanY).toFixed(2)}) ` +
+          `rotate(${lean.toFixed(2)} ${CX} ${CY}) ` +
           `rotate(${(dir * 180) / Math.PI} ${CX} ${CY}) scale(${sx.toFixed(3)} ${sy.toFixed(3)}) rotate(${(-dir * 180) / Math.PI} ${CX} ${CY})`
       )
 
@@ -257,9 +271,12 @@ export default function JellyBlob({ size = 300, hue = 265, mood = 'neutral', cue
       lLid.current?.setAttribute('d', lidPath(CX - EYE.dx, EYE.cy, EYE.rx, EYE.ry, effLid))
       rLid.current?.setAttribute('d', lidPath(CX + EYE.dx, EYE.cy, EYE.rx, EYE.ry, effLid))
 
-      // gaze
+      // gaze — explicit gaze prop wins, else track the pointer
       let gx = 0, gy = 0
-      if (state.pointer.inside) {
+      if (gz) {
+        gx = Math.max(-6, Math.min(6, gz.x * 0.1))
+        gy = Math.max(-6, Math.min(6, gz.y * 0.1))
+      } else if (state.pointer.inside) {
         const dx = state.pointer.x - (CX + state.px)
         const dy = state.pointer.y - (EYE.cy + state.py)
         const m = Math.hypot(dx, dy) || 1

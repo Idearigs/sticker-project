@@ -15,21 +15,28 @@ export default function App() {
   const [cue, setCue] = useState(null)
   const [speech, setSpeech] = useState('Going somewhere?')
 
+  // form companion
+  const [focus, setFocus] = useState(null)
+  const [email, setEmail] = useState('')
+  const [pw, setPw] = useState('')
+
   const fire = (type) => setCue({ type, id: Date.now() })
   const say = (m, text, c) => { setMood(m); setSpeech(text); if (c) fire(c) }
   const idle = () => { setMood('neutral'); setSpeech('Going somewhere?') }
+
+  const formMood = focus === 'password' ? 'password' : 'neutral'
+  // email: lean in toward the field (right). password: turn AWAY (left), eyes shut.
+  const formGaze = focus === 'email' ? { x: 62, y: -4 } : focus === 'password' ? { x: -54, y: 2 } : null
 
   return (
     <main className="page">
       <h1 className="brand">Live Action Stickers</h1>
 
       <div className="modal-wrap">
-        {/* colour orbs behind the glass so the blur has something to refract */}
         <div className="orb orb-a" />
         <div className="orb orb-b" />
         <div className="orb orb-c" />
 
-        {/* colour swatches */}
         <div className="swatches">
           {SWATCHES.map((s) => (
             <button
@@ -42,11 +49,10 @@ export default function App() {
           ))}
         </div>
 
-        {/* liquid-glass card */}
-        <div className="glass-card">
+        <div className="glass-card pop-in">
           <button className="close" onClick={() => say('surprised', 'Oh! Hi 👋', 'bounce')}>×</button>
 
-          <div className="bubble">{speech}</div>
+          {speech && <div className="bubble" key={speech}>{speech}</div>}
 
           <div className="modal-blob">
             <JellyBlob size={184} hue={hue} mood={mood} cue={cue} />
@@ -75,7 +81,6 @@ export default function App() {
           </div>
         </div>
 
-        {/* tiny emotion playground */}
         <div className="emotions">
           {MOODS.map((m) => (
             <button key={m} className={`chip ${m === mood ? 'on' : ''}`} onClick={() => { setMood(m); setSpeech('') }}>
@@ -84,6 +89,46 @@ export default function App() {
           ))}
         </div>
       </div>
+
+      {/* Form companion */}
+      <section className="companion">
+        <h2 className="sec-title">Form companion</h2>
+        <p className="lead">
+          Pair the slime with a form and it reacts to the field in focus — it leans in and
+          reads along as you type your email, then squeezes its eyes shut the moment you reach
+          the password. Wired with the <code>gaze</code> prop and a closed-eye <code>password</code> mood.
+        </p>
+
+        <div className="form-card">
+          <div className="form-blob">
+            <JellyBlob size={170} hue={hue} mood={formMood} gaze={formGaze} />
+          </div>
+          <div className="fields">
+            <label>Email</label>
+            <input
+              type="email"
+              value={email}
+              placeholder="you@example.com"
+              onFocus={() => setFocus('email')}
+              onBlur={() => setFocus(null)}
+              onChange={(e) => setEmail(e.target.value)}
+            />
+            <label>Password</label>
+            <input
+              type="password"
+              value={pw}
+              placeholder="••••••••"
+              onFocus={() => setFocus('password')}
+              onBlur={() => setFocus(null)}
+              onChange={(e) => setPw(e.target.value)}
+            />
+          </div>
+        </div>
+      </section>
+
+      <footer className="copyright">
+        © 2026 · developed by <strong>Idearigs</strong>
+      </footer>
     </main>
   )
 }
