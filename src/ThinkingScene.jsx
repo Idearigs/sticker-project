@@ -12,21 +12,21 @@ import * as THREE from 'three'
  * (low reflections) lit for a friendly render. Idles with a bob + squish.
  */
 
-const BODY = '#a259ff'
+const BODY = '#ab5cff'
 
 const bodyMat = {
   color: BODY,
-  roughness: 0.33,
+  roughness: 0.3,
   metalness: 0,
-  clearcoat: 0.55,
-  clearcoatRoughness: 0.38,
+  clearcoat: 0.6,
+  clearcoatRoughness: 0.35,
   transmission: 0,
-  emissive: '#6d28d9',
-  emissiveIntensity: 0.18,
-  sheen: 0.7,
+  emissive: '#7c3aed',
+  emissiveIntensity: 0.28,
+  sheen: 0.8,
   sheenRoughness: 0.4,
-  sheenColor: '#d8b4fe',
-  envMapIntensity: 0.45,
+  sheenColor: '#e9d5ff',
+  envMapIntensity: 0.5,
 }
 
 // a sphere deformed into a gumdrop: narrower top, wider bottom
@@ -69,9 +69,10 @@ function Eye({ x }) {
 }
 
 function Brow({ x, flip }) {
+  // thin, soft, slightly raised — friendly/curious (not worried)
   return (
-    <mesh position={[x, 0.34, 0.82]} rotation={[0.25, 0, flip * 0.18]}>
-      <boxGeometry args={[0.17, 0.04, 0.05]} />
+    <mesh position={[x, 0.33, 0.85]} rotation={[0.2, 0, Math.PI / 2 + flip * 0.05]}>
+      <capsuleGeometry args={[0.016, 0.11, 4, 12]} />
       <meshStandardMaterial color="#2a1330" roughness={0.5} />
     </mesh>
   )
@@ -138,19 +139,21 @@ function Slime() {
         <meshStandardMaterial color="#ff8fb6" transparent opacity={0.6} roughness={0.6} />
       </mesh>
 
-      {/* open smiling mouth: dark cavity + tongue, with an upper smile rim */}
-      <mesh position={[0, -0.24, 0.9]} scale={[0.2, 0.14, 0.12]}>
-        <sphereGeometry args={[1, 28, 28]} />
-        <meshStandardMaterial color="#3a0f28" roughness={0.5} />
-      </mesh>
-      <mesh position={[0, -0.3, 0.97]} scale={[0.12, 0.06, 0.06]}>
-        <sphereGeometry args={[1, 20, 20]} />
-        <meshStandardMaterial color="#ff6f96" roughness={0.5} />
-      </mesh>
-      <mesh position={[0, -0.17, 0.92]} rotation={[0, 0, Math.PI]}>
-        <torusGeometry args={[0.16, 0.022, 12, 28, Math.PI]} />
-        <meshStandardMaterial color="#3a0f28" roughness={0.5} />
-      </mesh>
+      {/* open smiling mouth — U-shaped grin, dark inside, little tongue */}
+      <group position={[0, -0.22, 0.88]}>
+        <mesh rotation={[0.15, 0, Math.PI]}>
+          <torusGeometry args={[0.18, 0.05, 16, 36, Math.PI]} />
+          <meshStandardMaterial color="#3a0f28" roughness={0.5} />
+        </mesh>
+        <mesh position={[0, -0.05, 0.02]} scale={[0.18, 0.1, 0.09]}>
+          <sphereGeometry args={[1, 28, 28]} />
+          <meshStandardMaterial color="#330b22" roughness={0.5} />
+        </mesh>
+        <mesh position={[0, -0.11, 0.12]} scale={[0.1, 0.05, 0.05]}>
+          <sphereGeometry args={[1, 20, 20]} />
+          <meshStandardMaterial color="#ff6f96" roughness={0.5} />
+        </mesh>
+      </group>
     </group>
   )
 }
@@ -174,14 +177,15 @@ export default function ThinkingScene() {
   return (
     <Canvas shadows dpr={[1, 2]} camera={{ position: [0, 0, 4.6], fov: 34 }}>
       <color attach="background" args={['#0c0a16']} />
-      <ambientLight intensity={0.6} />
-      <directionalLight position={[-3, 5, 4]} intensity={1.5} castShadow shadow-mapSize={[1024, 1024]} />
-      <pointLight position={[4, 1, 3]} intensity={0.8} color="#f0abfc" />
-      <pointLight position={[-4, 0, -3]} intensity={1.2} color="#a855f7" />
+      <ambientLight intensity={0.8} />
+      <directionalLight position={[-3, 5, 4]} intensity={2} castShadow shadow-mapSize={[1024, 1024]} />
+      <pointLight position={[4, 2, 3]} intensity={1.1} color="#f5d0fe" />
+      <pointLight position={[-4, 0, -3]} intensity={1.6} color="#c084fc" />
 
       <Float speed={1.2} rotationIntensity={0.15} floatIntensity={0.35}>
         <Slime />
-        <Bubble pos={[1.2, 1.25, 0.2]} r={0.16} speed={1.4} />
+        <Bubble pos={[1.25, 1.2, 0.2]} r={0.16} speed={1.4} />
+        <Bubble pos={[1.4, -0.1, 0.1]} r={0.13} speed={1.5} />
         <Bubble pos={[-1.15, -0.55, 0.3]} r={0.1} speed={1.7} />
       </Float>
 
