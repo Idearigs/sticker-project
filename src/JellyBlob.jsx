@@ -41,15 +41,16 @@ const MOODS = {
 }
 
 // mouth shape per mood: w=half-width, s=smile(+)/frown(-), o=resting openness
+// o is small/zero so the mouth rests CLOSED (just a lip line); it opens on cues.
 const MOUTHP = {
-  neutral:   { w: 11, s: 0.4, o: 5 },
-  happy:     { w: 17, s: 1.0, o: 13 },
-  sad:       { w: 13, s: -0.7, o: 4 },
-  angry:     { w: 16, s: -0.4, o: 12 },
-  surprised: { w: 12, s: 0.0, o: 17 },
-  love:      { w: 16, s: 1.0, o: 12 },
-  sleepy:    { w: 9, s: 0.0, o: 3 },
-  shy:       { w: 9, s: 0.5, o: 4 },
+  neutral:   { w: 11, s: 0.7, o: 0 },
+  happy:     { w: 15, s: 1.2, o: 3 },
+  sad:       { w: 12, s: -0.8, o: 0 },
+  angry:     { w: 14, s: -0.5, o: 2 },
+  surprised: { w: 11, s: 0.0, o: 5 },
+  love:      { w: 15, s: 1.2, o: 2 },
+  sleepy:    { w: 9, s: 0.1, o: 0 },
+  shy:       { w: 9, s: 0.6, o: 0 },
 }
 
 function buildShape() {
@@ -110,6 +111,7 @@ export default function JellyBlob({ size = 300, hue = 265, mood = 'neutral', cue
   const lLid = useRef(null)
   const rLid = useRef(null)
   const tearRef = useRef(null)
+  const lipRef = useRef(null)
   const mouthRef = useRef(null)
   const mouthClip = useRef(null)
   const tongueRef = useRef(null)
@@ -267,21 +269,26 @@ export default function JellyBlob({ size = 300, hue = 265, mood = 'neutral', cue
       lEye.current?.setAttribute('transform', `translate(${gx.toFixed(2)} ${gy.toFixed(2)})`)
       rEye.current?.setAttribute('transform', `translate(${gx.toFixed(2)} ${gy.toFixed(2)})`)
 
-      // --- mouth (driven every frame, opens on emotions/actions)
-      state.mouthOpen *= 0.93
+      // --- mouth: rests closed (a small lip line), opens on emotions/actions
+      state.mouthOpen *= 0.92
       const mp = MOUTHP[state.mood] || MOUTHP.neutral
-      const open = Math.max(2, mp.o + state.mouthOpen * 12 + Math.sin(state.t * 0.05) * 0.5)
+      const openH = Math.max(0, mp.o + state.mouthOpen * 13)
       const w = mp.w
-      const cornerY = MY - mp.s * 4
-      const md = `M${CX - w},${cornerY.toFixed(1)} Q${CX},${(MY - open * 0.18).toFixed(1)} ${CX + w},${cornerY.toFixed(1)} Q${CX},${(MY + open * 0.9).toFixed(1)} ${CX - w},${cornerY.toFixed(1)} Z`
-      mouthRef.current.setAttribute('d', md)
-      mouthClip.current.setAttribute('d', md)
-      const tcy = MY + open * 0.5
+      const sd = mp.s * 5 // lip curve depth (smile = bulge down)
+      // closed lip line (always visible) — a soft smile/frown
+      lipRef.current.setAttribute('d', `M${CX - w},${MY} Q${CX},${(MY + sd).toFixed(1)} ${CX + w},${MY}`)
+      // open cavity (fades in as it opens)
+      const cw = w * 0.82
+      const cav = `M${CX - cw},${MY - 0.5} Q${CX},${(MY + mp.s * 3).toFixed(1)} ${CX + cw},${MY - 0.5} Q${CX},${(MY + openH).toFixed(1)} ${CX - cw},${MY - 0.5} Z`
+      const cavOp = Math.max(0, Math.min(1, (openH - 2) / 5))
+      mouthRef.current.setAttribute('d', cav)
+      mouthRef.current.setAttribute('opacity', cavOp.toFixed(2))
+      mouthClip.current.setAttribute('d', cav)
       tongueRef.current.setAttribute('cx', CX)
-      tongueRef.current.setAttribute('cy', tcy.toFixed(1))
-      tongueRef.current.setAttribute('rx', (w * 0.62).toFixed(1))
-      tongueRef.current.setAttribute('ry', Math.max(1, open * 0.34).toFixed(1))
-      tongueRef.current.setAttribute('opacity', Math.max(0, Math.min(1, open / 7 - 0.4)).toFixed(2))
+      tongueRef.current.setAttribute('cy', (MY + openH * 0.5).toFixed(1))
+      tongueRef.current.setAttribute('rx', (cw * 0.7).toFixed(1))
+      tongueRef.current.setAttribute('ry', Math.max(1, openH * 0.32).toFixed(1))
+      tongueRef.current.setAttribute('opacity', cavOp.toFixed(2))
 
       // tear (sad)
       if (tearRef.current) {
@@ -343,17 +350,30 @@ export default function JellyBlob({ size = 300, hue = 265, mood = 'neutral', cue
     return <OpenEye ex={ex} eyeRef={eyeRef} lidRef={lidRef} clipId={clipId} />
   }
 
+  // realistic tapered brow: a curved sliver, thicker in the middle.
+  const browShape = (cx, outerX, outerY, midY, innerX, innerY) => {
+    const mx = (outerX + innerX) / 2
+    const th = 3.6 // half-thickness at the belly
+    return (
+      `M${outerX.toFixed(1)},${outerY.toFixed(1)} ` +
+      `Q${mx.toFixed(1)},${(midY - th).toFixed(1)} ${innerX.toFixed(1)},${innerY.toFixed(1)} ` +
+      `Q${mx.toFixed(1)},${(midY + th).toFixed(1)} ${outerX.toFixed(1)},${outerY.toFixed(1)} Z`
+    )
+  }
   const Brows = () => {
     if (!face.brow) return null
     let l, r
     if (face.brow === 'angry') {
-      l = `M${lex - 15},${BROWY - 3} L${lex + 13},${BROWY + 9}`; r = `M${rex + 15},${BROWY - 3} L${rex - 13},${BROWY + 9}`
+      l = browShape(lex, lex - 17, BROWY - 2, BROWY + 3, lex + 12, BROWY + 11)
+      r = browShape(rex, rex + 17, BROWY - 2, BROWY + 3, rex - 12, BROWY + 11)
     } else if (face.brow === 'sad') {
-      l = `M${lex - 15},${BROWY + 9} L${lex + 13},${BROWY - 2}`; r = `M${rex + 15},${BROWY + 9} L${rex - 13},${BROWY - 2}`
-    } else {
-      l = `M${lex - 14},${BROWY - 4} Q${lex},${BROWY - 12} ${lex + 14},${BROWY - 4}`; r = `M${rex - 14},${BROWY - 4} Q${rex},${BROWY - 12} ${rex + 14},${BROWY - 4}`
+      l = browShape(lex, lex - 17, BROWY + 10, BROWY + 4, lex + 12, BROWY - 3)
+      r = browShape(rex, rex + 17, BROWY + 10, BROWY + 4, rex - 12, BROWY - 3)
+    } else { // surprised — raised arches
+      l = browShape(lex, lex - 15, BROWY - 1, BROWY - 10, lex + 15, BROWY - 1)
+      r = browShape(rex, rex - 15, BROWY - 1, BROWY - 10, rex + 15, BROWY - 1)
     }
-    return <g stroke={dark} strokeWidth="5" strokeLinecap="round" fill="none"><path d={l} /><path d={r} /></g>
+    return <g fill={dark}><path d={l} /><path d={r} /></g>
   }
 
   return (
@@ -443,6 +463,8 @@ export default function JellyBlob({ size = 300, hue = 265, mood = 'neutral', cue
           <g clipPath={`url(#${mclip})`}>
             <ellipse ref={tongueRef} cx={CX} cy={MY + 6} rx="7" ry="3" fill="#ef7a93" />
           </g>
+          {/* lip line — the resting closed mouth */}
+          <path ref={lipRef} d="" fill="none" stroke="#9c2d4b" strokeWidth="3.4" strokeLinecap="round" />
         </g>
       </g>
     </svg>

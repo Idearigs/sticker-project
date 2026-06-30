@@ -10,9 +10,10 @@ spring physics on `requestAnimationFrame`, no animation libraries.
 - **Actions** — `shake` and `bounce` cues.
 - **Live interaction** — blinks with real eyelids, eyes track the cursor,
   poke to jiggle, drag to fling with squash-and-stretch.
-- **Password demo** — the slime shyly covers its eyes while you type, turns
-  red and shakes on a wrong password, bounces happily on the right one
-  (the password is `claude`).
+- **Glassmorphism "Log Out?" modal** — a frosted liquid-glass card where the
+  slime reacts to the buttons: happy + bounce on *Cancel*, sad + shake on
+  *Log Out*, with a glass speech bubble. Colour swatches re-skin it live.
+- **Password (demo constant)** — `sample`.
 
 ## Run locally
 
