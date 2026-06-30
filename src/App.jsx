@@ -129,13 +129,14 @@ export default function App() {
         </div>
       </section>
 
-      {/* 3D thinking */}
+      {/* 3D character */}
       <section className="thinking">
-        <h2 className="sec-title">Thinking — in 3D</h2>
+        <h2 className="sec-title">The character — in real 3D</h2>
         <p className="lead">
-          The same character rendered in real 3D with React Three Fiber — a translucent,
-          clear-coated body lit by an environment map. It ponders, taps its chin, and floats a
-          thought bubble that cycles <code>· · ·</code> → 💡 → ✨.
+          The exact blob, rebuilt as a true 3D model with React Three Fiber — a translucent,
+          clear-coated <code>MeshPhysicalMaterial</code> lit by an environment map, with big
+          sparkly eyes, blush, a soft smile and a little floating bubble. It idles with a gentle
+          bob and jelly squish.
         </p>
         <div className="canvas-wrap">
           <Suspense fallback={<div className="canvas-loading">Loading 3D…</div>}>
