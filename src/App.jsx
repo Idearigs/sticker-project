@@ -1,5 +1,8 @@
-import { useState } from 'react'
+import { useState, lazy, Suspense } from 'react'
 import JellyBlob from './JellyBlob'
+
+// Three.js is heavy — load the 3D scene only when this section renders.
+const ThinkingScene = lazy(() => import('./ThinkingScene'))
 
 const SWATCHES = [
   { hue: 265, label: 'Grape' },
@@ -123,6 +126,21 @@ export default function App() {
               onChange={(e) => setPw(e.target.value)}
             />
           </div>
+        </div>
+      </section>
+
+      {/* 3D thinking */}
+      <section className="thinking">
+        <h2 className="sec-title">Thinking — in 3D</h2>
+        <p className="lead">
+          The same character rendered in real 3D with React Three Fiber — a translucent,
+          clear-coated body lit by an environment map. It ponders, taps its chin, and floats a
+          thought bubble that cycles <code>· · ·</code> → 💡 → ✨.
+        </p>
+        <div className="canvas-wrap">
+          <Suspense fallback={<div className="canvas-loading">Loading 3D…</div>}>
+            <ThinkingScene />
+          </Suspense>
         </div>
       </section>
 

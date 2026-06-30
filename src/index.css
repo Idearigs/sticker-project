@@ -231,6 +231,23 @@ body {
   .fields { width: 100%; }
 }
 
+/* 3D thinking section */
+.thinking { width: min(680px, 94vw); margin-top: 30px; }
+.canvas-wrap {
+  height: 440px;
+  border-radius: 24px;
+  overflow: hidden;
+  border: 1px solid rgba(255,255,255,0.08);
+  background: radial-gradient(120% 100% at 50% 0%, #1a1330 0%, #0c0a16 70%);
+}
+.canvas-loading {
+  height: 100%;
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+  font-size: 14px;
+}
+
 /* copyright */
 .copyright {
   margin-top: 36px;
