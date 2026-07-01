@@ -23,7 +23,7 @@ const K = 0.08
 const DAMP = 0.84
 const TENSION = 0.16
 
-const EYE = { rx: 22, ry: 26, dx: 35, cy: 150 }
+const EYE = { rx: 21, ry: 28, dx: 34, cy: 147 }
 const BROWY = EYE.cy - EYE.ry - 4
 
 const smooth = (t) => t * t * (3 - 2 * t)
@@ -31,16 +31,20 @@ const lerp = (a, b, t) => a + (b - a) * t
 
 // mood -> colour shift + face config. hue=null keeps the base colour.
 const MOODS = {
-  neutral:   { hue: null, sat: 1,    eyes: 'normal', lid: 0,     brow: null },
+  // tilt: eyelid slope — inner-corner-down (angry glare) is negative,
+  // outer-corner-down (sad droop) is positive. gy: resting gaze bias (down = +).
+  neutral:   { hue: null, sat: 1,    eyes: 'normal', lid: 0,     brow: null,    tilt: 0,  gy: 0 },
   happy:     { hue: 138,  sat: 1,    eyes: 'happy',  lid: 0,     brow: null },
-  sad:       { hue: 210,  sat: 0.9,  eyes: 'normal', lid: 0.26,  brow: 'sad', tear: true },
-  angry:     { hue: 2,    sat: 1.2,  eyes: 'normal', lid: 0.2,   brow: 'angry' },
-  surprised: { hue: 45,   sat: 1,    eyes: 'wide',   lid: -0.08, brow: 'up' },
+  sad:       { hue: 210,  sat: 0.9,  eyes: 'normal', lid: 0.34,  brow: 'sad',   tilt: 8,  gy: 5, tear: true },
+  angry:     { hue: 2,    sat: 1.2,  eyes: 'normal', lid: 0.30,  brow: 'angry', tilt: -10, gy: 3 },
+  surprised: { hue: 45,   sat: 1,    eyes: 'wide',   lid: -0.08, brow: 'up',    tilt: 0,  gy: -1 },
   love:      { hue: 335,  sat: 1,    eyes: 'love',   lid: 0,     brow: null },
-  sleepy:    { hue: null, sat: 0.55, eyes: 'normal', lid: 0.6,   brow: null },
+  sleepy:    { hue: null, sat: 0.55, eyes: 'normal', lid: 0.62,  brow: null,    tilt: 0,  gy: 4 },
   shy:       { hue: 330,  sat: 1,    eyes: 'closed', lid: 0,     brow: null, blushBig: true },
   // squeezed-shut eyes for "not peeking at your password" — keeps base colour
   password:  { hue: null, sat: 1,    eyes: 'happy',  lid: 0,     brow: null, blushBig: true },
+  // pondering — eyes glance up, one brow up, mouth pursed, hand to chin
+  thinking:  { hue: null, sat: 1,    eyes: 'normal', lid: 0.14,  brow: 'up',    tilt: -3, gy: 0 },
 }
 
 // mouth shape per mood: w=half-width, s=smile(+)/frown(-), o=resting openness
@@ -55,6 +59,7 @@ const MOUTHP = {
   sleepy:    { w: 9, s: 0.1, o: 0 },
   shy:       { w: 9, s: 0.6, o: 0 },
   password:  { w: 10, s: 0.7, o: 0 },
+  thinking:  { w: 8, s: 0.2, o: 0 },
 }
 
 function buildShape() {
@@ -88,11 +93,23 @@ function smoothClosed(pts) {
   return d + 'Z'
 }
 
-function lidPath(ex, ey, rx, ry, b) {
-  const top = ey - ry - 6
-  const bottom = ey - ry + b * (2 * ry + 2)
-  const w = rx + 3
-  return `M${ex - w},${top} H${ex + w} V${bottom} Q${ex},${bottom + 6} ${ex - w},${bottom} Z`
+// Realistic upper eyelid: a skin flap whose LEADING edge is a soft downward
+// arc (draping over the round eyeball), sweeping from above the eye (open) to
+// below it (closed). Returns the fill flap + the lash-line edge to stroke.
+function lidGeom(ex, ey, rx, ry, b, tilt = 0) {
+  const top = ey - ry - 9
+  const w = rx + 4
+  const midY = ey - ry - 2 + b * (2 * ry + 6) // travels top -> below eye
+  const lY = midY - tilt // left corner of the leading edge
+  const rY = midY + tilt // right corner
+  const cY = (lY + rY) / 2 + ry * 0.5 // control point dips below the corners
+  const edge =
+    `M${(ex - w).toFixed(1)},${lY.toFixed(1)} ` +
+    `Q${ex.toFixed(1)},${cY.toFixed(1)} ${(ex + w).toFixed(1)},${rY.toFixed(1)}`
+  const fill =
+    `M${(ex - w).toFixed(1)},${top.toFixed(1)} H${(ex + w).toFixed(1)} ` +
+    `V${rY.toFixed(1)} Q${ex.toFixed(1)},${cY.toFixed(1)} ${(ex - w).toFixed(1)},${lY.toFixed(1)} Z`
+  return { fill, edge }
 }
 
 const sparkle = (x, y, s) =>
@@ -114,6 +131,8 @@ export default function JellyBlob({ size = 300, hue = 265, mood = 'neutral', cue
   const rEye = useRef(null)
   const lLid = useRef(null)
   const rLid = useRef(null)
+  const lLash = useRef(null)
+  const rLash = useRef(null)
   const tearRef = useRef(null)
   const lipRef = useRef(null)
   const mouthRef = useRef(null)
@@ -121,6 +140,10 @@ export default function JellyBlob({ size = 300, hue = 265, mood = 'neutral', cue
   const tongueRef = useRef(null)
   const lPaw = useRef(null)
   const rPaw = useRef(null)
+  const thoughtRef = useRef(null)
+  const thoughtTxt = useRef(null)
+  const orbFx = useRef(null)
+  const sparkFx = useRef([])
   const heartFx = useRef([])
   const zzzFx = useRef([])
   const steamFx = useRef([])
@@ -138,6 +161,7 @@ export default function JellyBlob({ size = 300, hue = 265, mood = 'neutral', cue
       action: null, actionClock: 0,
       tear: 0, mouthOpen: 0,
       gaze: null, leanX: 0, leanY: 0, cover: 0,
+      armLX: 0, armLY: 0, armLR: 0, armRX: 0, armRY: 0, armRR: 0,
     }
   }
   const state = ref.current
@@ -272,29 +296,89 @@ export default function JellyBlob({ size = 300, hue = 265, mood = 'neutral', cue
       const sx = (1 + stretch) * pop * breathe * msx
       const sy = (1 - stretch * 0.7) * pop * (2 - breathe) * msy
 
+      // thinking sequence: 6 beats (~1.15s each) looping —
+      // ponder · ponder+bubble · ponder · 💡idea · ✨aha · ✨resolved
+      const thinking = state.mood === 'thinking'
+      state.thinkClock = thinking ? (state.thinkClock ?? 0) + dtMs : 0
+      const tphase = thinking ? Math.floor(state.thinkClock / 1150) % 6 : -1
+
       // lean toward the gaze target (form companion "lean-in")
       const gz = state.gaze
-      const ltx = gz ? Math.max(-22, Math.min(22, gz.x * 0.32)) : 0
-      const lty = gz ? Math.max(-12, Math.min(12, gz.y * 0.2)) : 0
+      let ltx = gz ? Math.max(-22, Math.min(22, gz.x * 0.32)) : 0
+      let lty = gz ? Math.max(-12, Math.min(12, gz.y * 0.2)) : 0
+      if (thinking) { ltx = Math.sin(T * 0.024) * 15; lty = 3 } // gentle pondering rock
       state.leanX += (ltx - state.leanX) * 0.12
       state.leanY += (lty - state.leanY) * 0.12
       const lean = state.leanX * 0.5 // degrees of body tilt
 
-      // paws cover the eyes while typing a password
-      const coverTarget = state.mood === 'password' ? 1 : 0
-      state.cover += (coverTarget - state.cover) * 0.14
-      const cv = state.cover
-      const lift = Math.sin(Math.min(1, cv) * Math.PI) * 16
-      if (lPaw.current) {
-        const dx = lerp(0, (CX - EYE.dx) - (CX - 114), cv)
-        const dy = lerp(0, (EYE.cy + 2) - (CY + 18), cv) - lift
-        lPaw.current.setAttribute('transform', `translate(${dx.toFixed(1)} ${dy.toFixed(1)}) rotate(${(-cv * 18).toFixed(1)} ${CX - 114} ${CY + 18})`)
+      // --- hands: each emotion strikes a pose (arms raise, cover, tremble…)
+      // target offsets from the resting side positions, lerped for smoothness,
+      // with a per-frame overlay (wave / tremble / fidget) on top.
+      let alx = 0, aly = 0, alr = 0, arx = 0, ary = 0, arr = 0
+      if (state.mood === 'password') {          // both hands up over the eyes
+        alx = 79; aly = -40; alr = -16
+        arx = -79; ary = -40; arr = 16
+      } else if (state.mood === 'thinking') {
+        if (tphase === 1) {                     // hands clasped on the tummy
+          alx = 70; aly = 12; alr = 38; arx = -70; ary = 12; arr = -38
+        } else if (tphase === 2) {              // left hand up to the chin
+          alx = 80; aly = -6; alr = -70
+        } else if (tphase === 3) {              // both hands together — idea!
+          alx = 62; aly = 2; alr = 42; arx = -62; ary = 2; arr = -42
+        } else if (tphase >= 4) {               // relaxed, one hand to the cheek
+          arx = -72; ary = -2; arr = 60
+        } else {                                // right hand up to the chin
+          arx = -80; ary = -6; arr = 70
+        }
+      } else {
+        const p =
+          state.mood === 'happy'     ? { dx: 8,  dy: -48, rot: -44 } : // arms up cheering
+          state.mood === 'surprised' ? { dx: 24, dy: -40, rot: -58 } : // hands to face
+          state.mood === 'love'      ? { dx: 30, dy: -18, rot: -28 } : // hands to cheeks
+          state.mood === 'angry'     ? { dx: 18, dy: -8,  rot: -24 } : // fists up
+          state.mood === 'sad'       ? { dx: -2, dy: 16,  rot: 16 }  : // arms droop
+          state.mood === 'sleepy'    ? { dx: 0,  dy: 12,  rot: 10 }  :
+          state.mood === 'shy'       ? { dx: 32, dy: -28, rot: -46 } : // hands near face
+                                       { dx: 0,  dy: 0,   rot: 0 }
+        alx = p.dx; aly = p.dy; alr = p.rot
+        arx = -p.dx; ary = p.dy; arr = -p.rot
       }
-      if (rPaw.current) {
-        const dx = lerp(0, (CX + EYE.dx) - (CX + 114), cv)
-        const dy = lerp(0, (EYE.cy + 2) - (CY + 18), cv) - lift
-        rPaw.current.setAttribute('transform', `translate(${dx.toFixed(1)} ${dy.toFixed(1)}) rotate(${(cv * 18).toFixed(1)} ${CX + 114} ${CY + 18})`)
+      state.armLX += (alx - state.armLX) * 0.14
+      state.armLY += (aly - state.armLY) * 0.14
+      state.armLR += (alr - state.armLR) * 0.14
+      state.armRX += (arx - state.armRX) * 0.14
+      state.armRY += (ary - state.armRY) * 0.14
+      state.armRR += (arr - state.armRR) * 0.14
+
+      // per-frame overlay motion
+      let lwx = 0, lwy = 0, lwr = 0, rwx = 0, rwy = 0, rwr = 0
+      switch (state.mood) {
+        case 'happy':                            // waving both hands
+          lwr = Math.sin(T * 0.3) * 16; rwr = -Math.sin(T * 0.3) * 16
+          lwy = rwy = Math.sin(T * 0.3) * -3
+          break
+        case 'angry':                            // fists shaking
+          lwx = (Math.random() - 0.5) * 4; lwy = (Math.random() - 0.5) * 3
+          rwx = (Math.random() - 0.5) * 4; rwy = (Math.random() - 0.5) * 3
+          break
+        case 'shy':                              // bashful fidget
+          lwx = Math.sin(T * 0.12) * 3; rwx = Math.sin(T * 0.12) * 3
+          break
+        case 'surprised':
+          lwy = rwy = Math.sin(T * 0.5) * 2
+          break
+        case 'thinking':                         // tap-tap on the chin
+          rwr = Math.abs(Math.sin(T * 0.16)) * 6
+          break
       }
+      lPaw.current?.setAttribute(
+        'transform',
+        `translate(${(state.armLX + lwx).toFixed(1)} ${(state.armLY + lwy).toFixed(1)}) rotate(${(state.armLR + lwr).toFixed(1)} ${CX - 114} ${CY + 18})`
+      )
+      rPaw.current?.setAttribute(
+        'transform',
+        `translate(${(state.armRX + rwx).toFixed(1)} ${(state.armRY + rwy).toFixed(1)}) rotate(${(state.armRR + rwr).toFixed(1)} ${CX + 114} ${CY + 18})`
+      )
 
       const ring = pts.map((p) => ({ x: p.bx + p.nx * p.off, y: p.by + p.ny * p.off }))
       const d = smoothClosed(ring)
@@ -327,16 +411,31 @@ export default function JellyBlob({ size = 300, hue = 265, mood = 'neutral', cue
           else { state.blinkWait = 2200 + Math.random() * 3200; state.queueDouble = Math.random() < 0.25 }
         }
       }
-      const baseLid = face.lid
+      const curFace = MOODS[state.mood] || MOODS.neutral
+      const baseLid = curFace.lid
       const effLid = baseLid + (1 - baseLid) * bl
-      lLid.current?.setAttribute('d', lidPath(CX - EYE.dx, EYE.cy, EYE.rx, EYE.ry, effLid))
-      rLid.current?.setAttribute('d', lidPath(CX + EYE.dx, EYE.cy, EYE.rx, EYE.ry, effLid))
+      const escaleT = curFace.eyes === 'wide' ? 1.15 : 1
+      const rx = EYE.rx * escaleT, ry = EYE.ry * escaleT
+      const lashOp = Math.min(0.9, Math.max(0, effLid - 0.04) * 3).toFixed(2)
+      const coef = curFace.tilt || 0 // inner/outer eyelid slope for this mood
+      const lg = lidGeom(CX - EYE.dx, EYE.cy, rx, ry, effLid, -coef)
+      const rg = lidGeom(CX + EYE.dx, EYE.cy, rx, ry, effLid, +coef)
+      lLid.current?.setAttribute('d', lg.fill)
+      rLid.current?.setAttribute('d', rg.fill)
+      lLash.current?.setAttribute('d', lg.edge)
+      rLash.current?.setAttribute('d', rg.edge)
+      lLash.current?.setAttribute('opacity', lashOp)
+      rLash.current?.setAttribute('opacity', lashOp)
 
       // gaze — surprised darts side to side; else explicit gaze, else the pointer
       let gx = 0, gy = 0
       if (state.mood === 'surprised') {
         gx = Math.sin(state.t * 0.05) * 6.5
         gy = -1.5
+      } else if (state.mood === 'thinking') {
+        if (tphase === 3) { gx = 0; gy = -6 }             // look up at the idea
+        else if (tphase >= 4) { gx = 4; gy = -3 }          // aha — glance up, pleased
+        else { gx = Math.sin(state.t * 0.03) * 4 - 2; gy = 2.5 } // ponder, look down/around
       } else if (gz) {
         gx = Math.max(-6, Math.min(6, gz.x * 0.1))
         gy = Math.max(-6, Math.min(6, gz.y * 0.1))
@@ -347,6 +446,7 @@ export default function JellyBlob({ size = 300, hue = 265, mood = 'neutral', cue
         gx = (dx / m) * Math.min(5, m * 0.05)
         gy = (dy / m) * Math.min(5, m * 0.05)
       }
+      gy += curFace.gy || 0 // mood resting gaze (sad/sleepy look down, etc.)
       lEye.current?.setAttribute('transform', `translate(${gx.toFixed(2)} ${gy.toFixed(2)})`)
       rEye.current?.setAttribute('transform', `translate(${gx.toFixed(2)} ${gy.toFixed(2)})`)
 
@@ -435,6 +535,36 @@ export default function JellyBlob({ size = 300, hue = 265, mood = 'neutral', cue
         } else sweatFx.current.setAttribute('opacity', '0')
       }
 
+      // --- thinking overlays: thought cloud (dots / 💡), floating bubble, sparkles
+      const cloudOn = thinking && (tphase === 0 || tphase === 2 || tphase === 3)
+      state.thoughtA = (state.thoughtA ?? 0) + ((cloudOn ? 1 : 0) - (state.thoughtA ?? 0)) * 0.16
+      if (thoughtRef.current) {
+        thoughtRef.current.setAttribute('opacity', state.thoughtA.toFixed(2))
+        thoughtRef.current.setAttribute('transform', `translate(0 ${(Math.sin(T * 0.05) * 3).toFixed(1)})`)
+      }
+      if (thoughtTxt.current) {
+        const glyph = tphase === 3 ? '💡' : '· · ·'
+        if (thoughtTxt.current.textContent !== glyph) thoughtTxt.current.textContent = glyph
+      }
+      // floating bubble orb (beat 2)
+      const orbOn = thinking && tphase === 1
+      state.orbA = (state.orbA ?? 0) + ((orbOn ? 1 : 0) - (state.orbA ?? 0)) * 0.16
+      if (orbFx.current) {
+        const fl = Math.sin(T * 0.06) * 4
+        orbFx.current.setAttribute('opacity', state.orbA.toFixed(2))
+        orbFx.current.setAttribute('transform', `translate(${fl.toFixed(1)} ${(-Math.abs(fl)).toFixed(1)})`)
+      }
+      // sparkles (beats 5–6: aha!)
+      const sparkOn = thinking && tphase >= 4
+      const sPos = [[CX + 78, 60, 9], [CX + 102, 88, 6], [CX + 56, 92, 5]]
+      sparkFx.current.forEach((el, i) => {
+        if (!el) return
+        const tw = 0.5 + 0.5 * Math.sin(T * 0.12 + i * 2.1)
+        const [sx0, sy0, ss] = sPos[i]
+        el.setAttribute('d', sparkle(sx0, sy0, ss * (0.5 + 0.7 * tw)))
+        el.setAttribute('opacity', (sparkOn ? (0.45 + 0.55 * tw) : 0).toFixed(2))
+      })
+
       raf = requestAnimationFrame(tick)
     }
     raf = requestAnimationFrame(tick)
@@ -461,7 +591,7 @@ export default function JellyBlob({ size = 300, hue = 265, mood = 'neutral', cue
   const deg = face.hue == null ? 0 : face.hue - hue
   const filter = `hue-rotate(${deg}deg) saturate(${face.sat})`
 
-  const OpenEye = ({ ex, eyeRef, lidRef, clipId }) => (
+  const OpenEye = ({ ex, eyeRef, lidRef, lashRef, clipId }) => (
     <g>
       <clipPath id={clipId}>
         <ellipse cx={ex} cy={EYE.cy} rx={EYE.rx * escale + 3} ry={EYE.ry * escale + 3} />
@@ -469,21 +599,25 @@ export default function JellyBlob({ size = 300, hue = 265, mood = 'neutral', cue
       <g clipPath={`url(#${clipId})`}>
         <g ref={eyeRef}>
           <ellipse cx={ex} cy={EYE.cy} rx={EYE.rx * escale} ry={EYE.ry * escale} fill={`url(#${eid})`} />
-          <ellipse cx={ex - 7} cy={EYE.cy - 9} rx="7.5" ry="9.5" fill="#fff" />
-          <circle cx={ex + 6} cy={EYE.cy + 8} r="3.6" fill="#fff" />
-          <circle cx={ex + 8} cy={EYE.cy - 7} r="1.8" fill="#fff" opacity="0.8" />
+          {/* glossy highlights — lit from the upper-left, matched on both eyes */}
+          <ellipse cx={ex - 6} cy={EYE.cy - 11} rx="8.5" ry="11" fill="#fff" />
+          <circle cx={ex + 7} cy={EYE.cy + 10} r="4.6" fill="#fff" />
+          <circle cx={ex + 9} cy={EYE.cy - 5} r="2" fill="#fff" opacity="0.85" />
         </g>
-        <path ref={lidRef} d="" fill={lidCol} />
+        {/* skin lid flap (body-shaded so it looks like skin folding over) */}
+        <path ref={lidRef} d="" fill={`url(#${gid})`} />
+        {/* lash line along the lid's leading edge */}
+        <path ref={lashRef} d="" fill="none" stroke="#2b1533" strokeWidth="3" strokeLinecap="round" opacity="0" />
       </g>
     </g>
   )
-  const renderEye = (ex, eyeRef, lidRef, clipId) => {
+  const renderEye = (ex, eyeRef, lidRef, lashRef, clipId) => {
     if (face.eyes === 'happy')
       return <path d={`M${ex - 16},${EYE.cy + 3} Q${ex},${EYE.cy - 15} ${ex + 16},${EYE.cy + 3}`} fill="none" stroke="#23142e" strokeWidth="5" strokeLinecap="round" />
     if (face.eyes === 'closed')
       return <path d={`M${ex - 15},${EYE.cy - 1} Q${ex},${EYE.cy + 9} ${ex + 15},${EYE.cy - 1}`} fill="none" stroke="#23142e" strokeWidth="4.5" strokeLinecap="round" />
     if (face.eyes === 'love') return <path d={heart(ex, EYE.cy, 30)} fill="#ff3d77" />
-    return <OpenEye ex={ex} eyeRef={eyeRef} lidRef={lidRef} clipId={clipId} />
+    return <OpenEye ex={ex} eyeRef={eyeRef} lidRef={lidRef} lashRef={lashRef} clipId={clipId} />
   }
 
   // realistic tapered brow: a curved sliver, thicker in the middle.
@@ -527,9 +661,10 @@ export default function JellyBlob({ size = 300, hue = 265, mood = 'neutral', cue
           <stop offset="46%" stopColor={`hsl(${hue}, 92%, 70%)`} />
           <stop offset="100%" stopColor={`hsl(${hue}, 82%, 46%)`} />
         </radialGradient>
-        <radialGradient id={eid} cx="50%" cy="42%" r="62%">
-          <stop offset="0%" stopColor={`hsl(${hue}, 45%, 26%)`} />
-          <stop offset="100%" stopColor={`hsl(${hue}, 60%, 11%)`} />
+        <radialGradient id={eid} cx="50%" cy="38%" r="65%">
+          <stop offset="0%" stopColor={`hsl(${hue}, 50%, 10%)`} />
+          <stop offset="65%" stopColor={`hsl(${hue}, 48%, 13%)`} />
+          <stop offset="100%" stopColor={`hsl(${hue}, 44%, 22%)`} />
         </radialGradient>
         {/* ambient occlusion — dark, bottom-weighted edges = round 3D volume */}
         <radialGradient id={sid} cx="50%" cy="34%" r="70%">
@@ -556,12 +691,35 @@ export default function JellyBlob({ size = 300, hue = 265, mood = 'neutral', cue
         <clipPath id={mclip}><path ref={mouthClip} d="" /></clipPath>
       </defs>
 
-      {/* ground shadow (stays put) */}
-      <ellipse cx={CX} cy={CY + HY + 6} rx="84" ry="15" fill="rgba(0,0,0,0.22)" />
+      {/* ground shadow (stays put) — sits under the feet */}
+      <ellipse cx={CX} cy={CY + HY + 26} rx="88" ry="14" fill="rgba(0,0,0,0.22)" />
 
       <g ref={bodyG}>
         {/* outer glow (moves with body) */}
         <path ref={glowEl} d="" fill={`hsla(${hue}, 100%, 70%, 0.35)`} filter={`url(#${fid})`} />
+
+        {/* cute stubby legs — drawn behind the body so their tops tuck underneath.
+            Each shape reuses the body radial gradient, which shades light-top →
+            dark-bottom per shape for an automatic rounded 3D look. */}
+        <g>
+          {/* contact shadows under the feet */}
+          <ellipse cx={CX - 40} cy={301} rx="20" ry="6" fill="rgba(0,0,0,0.18)" />
+          <ellipse cx={CX + 40} cy={301} rx="20" ry="6" fill="rgba(0,0,0,0.18)" />
+          {/* left leg + foot */}
+          <g>
+            <ellipse cx={CX - 39} cy={276} rx="16" ry="23" fill={`url(#${gid})`} />
+            <ellipse cx={CX - 42} cy={292} rx="21" ry="14" fill={`url(#${gid})`} />
+            <ellipse cx={CX - 44} cy={289} rx="9" ry="5" fill="#fff" opacity="0.3" />
+            <ellipse cx={CX - 44} cy={270} rx="5.5" ry="8" fill="#fff" opacity="0.3" />
+          </g>
+          {/* right leg + foot */}
+          <g>
+            <ellipse cx={CX + 39} cy={276} rx="16" ry="23" fill={`url(#${gid})`} />
+            <ellipse cx={CX + 42} cy={292} rx="21" ry="14" fill={`url(#${gid})`} />
+            <ellipse cx={CX + 40} cy={289} rx="9" ry="5" fill="#fff" opacity="0.3" />
+            <ellipse cx={CX + 34} cy={270} rx="5.5" ry="8" fill="#fff" opacity="0.3" />
+          </g>
+        </g>
 
         {/* body fill */}
         <path ref={pathRef} d="" fill={`url(#${gid})`} />
@@ -588,8 +746,8 @@ export default function JellyBlob({ size = 300, hue = 265, mood = 'neutral', cue
         <ellipse cx={CX + 60} cy={EYE.cy + 30} rx={face.blushBig ? 20 : 17} ry={face.blushBig ? 13 : 11} fill={cheek} />
 
         {/* eyes */}
-        {renderEye(lex, lEye, lLid, `lc-${hue}`)}
-        {renderEye(rex, rEye, rLid, `rc-${hue}`)}
+        {renderEye(lex, lEye, lLid, lLash, `lc-${hue}`)}
+        {renderEye(rex, rEye, rLid, rLash, `rc-${hue}`)}
         <Brows />
         {face.tear && <ellipse ref={tearRef} cx={lex + 4} cy={EYE.cy + EYE.ry} rx="5" ry="7" fill="#7ec8ff" />}
 
@@ -626,6 +784,45 @@ export default function JellyBlob({ size = 300, hue = 265, mood = 'neutral', cue
           ))}
           <path ref={sweatFx} d="" fill="#9fd4ff" opacity="0" />
         </g>
+      </g>
+
+      {/* thought bubble — floats by the head while 'thinking' */}
+      <g ref={thoughtRef} opacity="0">
+        <circle cx={CX + 52} cy={148} r="4" fill="#fff" opacity="0.8" />
+        <circle cx={CX + 62} cy={126} r="6" fill="#fff" opacity="0.9" />
+        <g>
+          <circle cx={CX + 62} cy={92} r="21" fill="#fff" />
+          <circle cx={CX + 88} cy={98} r="15" fill="#fff" />
+          <circle cx={CX + 86} cy={78} r="14" fill="#fff" />
+          <circle cx={CX + 44} cy={86} r="15" fill="#fff" />
+          <circle cx={CX + 70} cy={74} r="13" fill="#fff" />
+        </g>
+        <text
+          ref={thoughtTxt}
+          x={CX + 66}
+          y={92}
+          fontSize="20"
+          textAnchor="middle"
+          dominantBaseline="central"
+          fontFamily="system-ui, sans-serif"
+          fontWeight="800"
+          fill="#7a5cff"
+        >
+          · · ·
+        </text>
+      </g>
+
+      {/* floating soap-bubble (thinking beat 2) */}
+      <g ref={orbFx} opacity="0">
+        <circle cx={CX + 96} cy={78} r="15" fill={`hsla(${hue}, 90%, 82%, 0.4)`} stroke="#fff" strokeOpacity="0.55" strokeWidth="1.5" />
+        <circle cx={CX + 90} cy={72} r="4.5" fill="#fff" opacity="0.75" />
+      </g>
+
+      {/* sparkles (thinking "aha") */}
+      <g fill="#fdf6ff">
+        {[0, 1, 2].map((i) => (
+          <path key={`sp${i}`} ref={(el) => (sparkFx.current[i] = el)} d="" opacity="0" />
+        ))}
       </g>
     </svg>
   )

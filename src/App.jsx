@@ -1,8 +1,5 @@
-import { useState, lazy, Suspense } from 'react'
+import { useState } from 'react'
 import JellyBlob from './JellyBlob'
-
-// Three.js is heavy — load the 3D scene only when this section renders.
-const ThinkingScene = lazy(() => import('./ThinkingScene'))
 
 const SWATCHES = [
   { hue: 265, label: 'Grape' },
@@ -10,7 +7,7 @@ const SWATCHES = [
   { hue: 12, label: 'Coral' },
   { hue: 45, label: 'Gold' },
 ]
-const MOODS = ['neutral', 'happy', 'sad', 'angry', 'surprised', 'love', 'sleepy', 'shy']
+const MOODS = ['neutral', 'happy', 'sad', 'angry', 'surprised', 'love', 'sleepy', 'shy', 'thinking']
 
 export default function App() {
   const [hue, setHue] = useState(150)
@@ -126,22 +123,6 @@ export default function App() {
               onChange={(e) => setPw(e.target.value)}
             />
           </div>
-        </div>
-      </section>
-
-      {/* 3D character */}
-      <section className="thinking">
-        <h2 className="sec-title">The character — in real 3D</h2>
-        <p className="lead">
-          The exact blob, rebuilt as a true 3D model with React Three Fiber — a translucent,
-          clear-coated <code>MeshPhysicalMaterial</code> lit by an environment map, with big
-          sparkly eyes, blush, a soft smile and a little floating bubble. It idles with a gentle
-          bob and jelly squish.
-        </p>
-        <div className="canvas-wrap">
-          <Suspense fallback={<div className="canvas-loading">Loading 3D…</div>}>
-            <ThinkingScene />
-          </Suspense>
         </div>
       </section>
 
