@@ -125,10 +125,6 @@ export default function App() {
           </div>
         </div>
       </section>
-
-      <footer className="copyright">
-        © 2026 · developed by <strong>Idearigs</strong>
-      </footer>
     </main>
   )
 }
